@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { mount, type VueWrapper } from '@vue/test-utils'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { RouterView } from 'vue-router'
 import router from '../src/app/router'
 
@@ -18,10 +18,10 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-it('在首页分类显示四个开发工具，点击链接可进入对应页面', async () => {
+it('在首页分类显示开发工具，点击链接可进入对应页面', async () => {
   const page = await open('/?category=developer')
   expect(page.findAll('.tool-card h3').map(title => title.text())).toEqual([
-    'JSON 格式化', '时间戳转换', 'Base64 互转', '文本差异对比',
+    'JSON 格式化', '时间戳转换', 'Base64 互转', '文本差异对比', '分隔符批量替换', 'IP 归属地查询',
   ])
   const link = page.get('a.tool-title-link[href="/tools/json-format"]')
   await router.push(link.attributes('href'))
@@ -206,6 +206,128 @@ it('文本对比保留空白差异、行号和末尾换行，并可筛掉相同�
   expect(page.get('.diff-no-newline').text()).toBe('无行尾换行')
   const removedLine = page.get('tr.removed').findAll('td').slice(0, 2).map(cell => cell.text())
   expect(removedLine).toEqual(['2', ''])
+})
+
+it('批量替换混合分隔符，可选择跳过空项和去重', async () => {
+  const page = await open('/tools/separator-replace')
+  const input = page.get('#separator-source')
+  const output = page.get<HTMLTextAreaElement>('#separator-result')
+  await input.setValue('甲\n乙\n乙')
+  expect(output.element.value).toBe('甲,乙,乙')
+
+  await page.get('input[value=","]').setValue(true)
+  await page.get('input[value=" "]').setValue(true)
+  await page.get('#separator-target').setValue(';')
+  await input.setValue('甲\r\n乙, 甲 丙,')
+  expect(output.element.value).toBe('甲;乙;;甲;丙;')
+
+  await page.get('#separator-skip-empty').setValue(true)
+  expect(output.element.value).toBe('甲;乙;甲;丙')
+  await page.get('#separator-deduplicate').setValue(true)
+  expect(output.element.value).toBe('甲;乙;丙')
+})
+
+it('自定义分隔符按字面匹配，可复制结果并清空输入', async () => {
+  const page = await open('/tools/separator-replace')
+  const input = page.get<HTMLTextAreaElement>('#separator-source')
+  const output = page.get<HTMLTextAreaElement>('#separator-result')
+  await input.setValue('甲||乙|丙\n丁')
+  await page.get('input[value="|"]').setValue(true)
+  await page.get('input[value="custom"]').setValue(true)
+  expect(page.get('[role="alert"]').text()).toContain('自定义原分隔符')
+
+  await page.get('#separator-custom-source').setValue('||')
+  await page.get('#separator-target').setValue('custom')
+  expect(page.get('[role="alert"]').text()).toContain('自定义目标分隔符')
+  await page.get('#separator-custom-target').setValue('$&')
+  expect(output.element.value).toBe('甲$&乙$&丙$&丁')
+
+  const writeText = vi.fn().mockResolvedValue(undefined)
+  vi.stubGlobal('navigator', { clipboard: { writeText } })
+  try {
+    await page.findAll('button').find(button => button.text() === '复制结果')!.trigger('click')
+    expect(writeText).toHaveBeenCalledWith('甲$&乙$&丙$&丁')
+  } finally {
+    vi.unstubAllGlobals()
+  }
+
+  await page.get('#separator-target').setValue('')
+  expect(output.element.value).toBe('甲乙丙丁')
+  await page.findAll('button').find(button => button.text() === '清空')!.trigger('click')
+  expect(input.element.value).toBe('')
+  expect(output.element.value).toBe('')
+})
+
+it('两个公网地址独立返回，IPv4 始终排在 IPv6 前面', async () => {
+  const ipv4 = Promise.withResolvers<Response>()
+  const fetchIp = vi.fn()
+    .mockReturnValueOnce(ipv4.promise)
+    .mockResolvedValueOnce(Response.json({ ip: '2606:4700:4700::1111', country_code: 'CN', region: 'Guangdong', city: 'Guangzhou' }))
+    .mockResolvedValueOnce(Response.json({ ip: '2001:4860:4860::8888', country_code: 'JP', region: 'Tokyo', city: 'Tokyo' }))
+  vi.stubGlobal('fetch', fetchIp)
+  try {
+    const page = await open('/tools/ip-location')
+    const current = page.get('section[aria-labelledby="current-ip-title"]')
+    const form = page.get('form[aria-labelledby="ip-query-title"]')
+    const versions = () => current.findAll('.ip-version').map(label => label.text())
+    await vi.waitFor(() => expect(versions()).toEqual(['IPv6']))
+    expect(current.get('[role="status"]').text()).toContain('正在查询 IPv4')
+
+    expect(fetchIp).toHaveBeenNthCalledWith(1, 'https://api-ipv4.ip.sb/geoip', expect.objectContaining({ credentials: 'omit' }))
+    expect(fetchIp).toHaveBeenNthCalledWith(2, 'https://api-ipv6.ip.sb/geoip', expect.any(Object))
+    ipv4.resolve(Response.json({ ip: '1.1.1.1', country_code: 'CN', region: 'Fujian', city: 'Xiamen' }))
+    await vi.waitFor(() => expect(versions()).toEqual(['IPv4', 'IPv6']))
+    const details = current.findAll('.ip-details')
+    expect(details[0].findAll('dd').map(field => field.text())).toEqual(['中国', '福建省', '厦门市'])
+    expect(details[1].findAll('dd').map(field => field.text())).toEqual(['中国', '广东省', '广州市'])
+
+    await form.get('#ip-query-input').setValue(' 2001:4860:4860:0000:0000:0000:0000:8888 ')
+    await form.trigger('submit')
+    await flushPromises()
+
+    expect(fetchIp).toHaveBeenNthCalledWith(3, 'https://api.ip.sb/geoip/2001%3A4860%3A4860%3A%3A8888', expect.any(Object))
+    expect(form.get('code').text()).toBe('2001:4860:4860::8888')
+    expect(form.get('.ip-version').text()).toBe('IPv6')
+    expect(form.findAll('dd').map(field => field.text())).toEqual(['日本', '东京都', '东京'])
+    expect(current.findAll('code').map(value => value.text())).toEqual(['1.1.1.1', '2606:4700:4700::1111'])
+  } finally {
+    vi.unstubAllGlobals()
+  }
+})
+
+it('公网查询限流后可刷新，只有 IPv4 可用时仍显示结果', async () => {
+  const fetchIp = vi.fn()
+    .mockResolvedValueOnce(new Response(null, { status: 429 }))
+    .mockResolvedValueOnce(new Response(null, { status: 429 }))
+    .mockResolvedValueOnce(Response.json({ ip: '8.8.8.8', country: 'United States' }))
+    .mockRejectedValueOnce(new TypeError('IPv6 unavailable'))
+  vi.stubGlobal('fetch', fetchIp)
+  try {
+    const page = await open('/tools/ip-location')
+    const current = page.get('section[aria-labelledby="current-ip-title"]')
+    const form = page.get('form[aria-labelledby="ip-query-title"]')
+    await flushPromises()
+    expect(current.get('[role="alert"]').text()).toContain('查询次数过多')
+
+    await form.get('#ip-query-input').setValue('256.0.1.1')
+    await form.trigger('submit')
+    expect(form.get('#ip-query-error').text()).toContain('有效的 IPv4 或 IPv6')
+
+    await form.get('#ip-query-input').setValue('::ffff:192.168.1.20')
+    await form.trigger('submit')
+    expect(form.get('#ip-query-error').text()).toContain('私网')
+    expect(fetchIp).toHaveBeenCalledTimes(2)
+
+    await current.get('button[aria-label="刷新当前公网 IP"]').trigger('click')
+    await flushPromises()
+    expect(fetchIp).toHaveBeenCalledTimes(4)
+    expect(current.find('[role="alert"]').exists()).toBe(false)
+    expect(current.findAll('.ip-version').map(label => label.text())).toEqual(['IPv4'])
+    expect(current.get('code').text()).toBe('8.8.8.8')
+    expect(current.findAll('dd').map(field => field.text())).toEqual(['United States', '暂无数据', '暂无数据'])
+  } finally {
+    vi.unstubAllGlobals()
+  }
 })
 
 it('生活工具分类显示日期计算器和星座查询入口', async () => {

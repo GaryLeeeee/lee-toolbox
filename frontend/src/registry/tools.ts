@@ -1,5 +1,5 @@
 import type { Component } from 'vue'
-import { Binary, Braces, CalendarDays, Clock3, Code2, Diff, Download, Film, Images, Sparkles } from 'lucide-vue-next'
+import { Binary, Braces, CalendarDays, Clock3, Code2, Diff, Download, Film, Globe, Images, ReplaceAll, Sparkles } from 'lucide-vue-next'
 
 export interface ToolDefinition {
   id: string
@@ -56,6 +56,18 @@ export const tools: ToolDefinition[] = [{
   category: 'developer', tags: ['文本', 'Diff', '差异', '对比'],
   route: '/tools/text-diff', execution: 'browser', icon: Diff,
   component: () => import('../tools/text-diff/TextDiff.vue'),
+}, {
+  id: 'separator-replace', name: '分隔符批量替换',
+  description: '把换行符、空格、逗号等批量替换成指定分隔符，支持自定义和去重。',
+  category: 'developer', tags: ['分隔符', '文本', '替换', '制表符', 'Tab', '去重'],
+  route: '/tools/separator-replace', execution: 'browser', icon: ReplaceAll,
+  component: () => import('../tools/separator-replace/SeparatorReplace.vue'),
+}, {
+  id: 'ip-location', name: 'IP 归属地查询',
+  description: '查看当前公网 IP 和对应地区，也可查询其他 IPv4 或 IPv6 地址的归属地。',
+  category: 'developer', tags: ['IP', '地区', '公网', 'IPv4', 'IPv6'],
+  route: '/tools/ip-location', execution: 'browser', icon: Globe,
+  component: () => import('../tools/ip-location/IpLocation.vue'),
 }, {
   id: 'date-calculator', name: '日期计算器',
   description: '计算两个日期相差多少天，也可按天或工作日向前、向后推算。',
