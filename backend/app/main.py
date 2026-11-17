@@ -5,21 +5,24 @@ from pathlib import Path
 import subprocess
 import sys
 import threading
+from typing import Literal
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from fastapi.responses import FileResponse, JSONResponse, Response
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.errors import AppError
 from app.core.settings import get_settings
-from app.services.files import public_task, require_task_file
+from app.services.files import FILE_TYPES, public_task, require_task_file
 from app.services.media import ffmpeg_binary
+from app.services.previews import PreviewRegistry, fetch_preview
 from app.storage.database import Store, STATUSES
 
 resolve_slots = threading.BoundedSemaphore(2)
+preview_slots = threading.BoundedSemaphore(4)
 
 
 class ResolveInput(BaseModel):
@@ -36,8 +39,10 @@ class ResolveInput(BaseModel):
 
 class TaskInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    tool_id: Literal["video-download", "xiaohongshu-export"] = "video-download"
     source_text: str = Field(min_length=1, max_length=5000)
     format_id: str | None = Field(default=None, min_length=1, max_length=160)
+    asset_ids: list[str] | None = Field(default=None, min_length=1, max_length=100)
 
     @field_validator("source_text")
     @classmethod
@@ -45,6 +50,21 @@ class TaskInput(BaseModel):
         if not value.strip():
             raise ValueError("empty")
         return value.strip()
+
+    @field_validator("asset_ids")
+    @classmethod
+    def valid_selection(cls, value):
+        if value is not None and (any(not item.strip() or len(item) > 160 for item in value)
+                                  or len(set(value)) != len(value)):
+            raise ValueError("Invalid selection")
+        return value
+
+    @model_validator(mode="after")
+    def compatible_tool(self):
+        if ((self.tool_id == "video-download" and self.asset_ids is not None)
+                or (self.tool_id == "xiaohongshu-export" and self.format_id is not None)):
+            raise ValueError("Tool options do not match")
+        return self
 
 
 def error_response(code, message, status_code):
@@ -59,6 +79,7 @@ async def lifespan(app: FastAPI):
     store.initialize()
     app.state.settings = settings
     app.state.store = store
+    app.state.previews = PreviewRegistry()
     app.state.worker = None
     if settings.worker_enabled:
         app.state.worker = subprocess.Popen([sys.executable, "-m", "app.jobs.worker"], cwd=Path(__file__).resolve().parents[1])
@@ -144,10 +165,41 @@ def resolve_media(body: ResolveInput):
         resolve_slots.release()
 
 
+@app.post("/api/xhs/resolve")
+def resolve_xiaohongshu(body: ResolveInput, request: Request):
+    from app.providers.xiaohongshu import resolve, public_note, ProviderError
+    if not resolve_slots.acquire(blocking=False):
+        raise AppError("RESOLVE_BUSY", "正在解析其他作品，请稍后重试。", 429)
+    try:
+        note = resolve(body.text)
+        result = public_note(note)
+        assets = {asset.id: asset for asset in note.assets}
+        for item in result["assets"]:
+            item["preview_url"] = request.app.state.previews.register(assets[item["id"]].image_urls, note.headers)
+        return result
+    except ProviderError as exc:
+        raise AppError(exc.code, exc.message, 422) from exc
+    finally:
+        resolve_slots.release()
+
+
+@app.get("/api/xhs/previews/{token}")
+def image_preview(token: str, request: Request):
+    preview = request.app.state.previews.get(token)
+    if not preview_slots.acquire(blocking=False):
+        raise AppError("PREVIEW_BUSY", "正在加载其他预览，请稍后重试。", 429)
+    try:
+        data, mime = fetch_preview(preview)
+        return Response(data, media_type=mime, headers={"Content-Security-Policy": "default-src 'none'"})
+    finally:
+        preview_slots.release()
+
+
 @app.post("/api/tasks", status_code=201)
 def create_task(body: TaskInput, request: Request):
     settings = request.app.state.settings
-    task = request.app.state.store.create(body.source_text, body.format_id, settings.max_active_tasks)
+    task = request.app.state.store.create(body.source_text, body.format_id, settings.max_active_tasks,
+                                          tool_id=body.tool_id, asset_ids=body.asset_ids)
     return public_task(task, settings.downloads_dir)
 
 
@@ -182,7 +234,7 @@ def download_file(task_id: str, request: Request):
     path = require_task_file(task, request.app.state.settings.downloads_dir)
     # User-facing filename omits the UUID used for collision-free local storage.
     name = path.name.removeprefix(task["id"] + "_")
-    return FileResponse(path, media_type="video/mp4", filename=name)
+    return FileResponse(path, media_type=FILE_TYPES.get(path.suffix.lower(), "application/octet-stream"), filename=name)
 
 
 @app.get("/{path:path}", include_in_schema=False)

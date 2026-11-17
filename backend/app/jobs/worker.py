@@ -3,6 +3,7 @@ import fcntl
 import logging
 import os
 import signal
+import shutil
 import time
 from pathlib import Path
 
@@ -10,7 +11,7 @@ from app.core.errors import AppError, TaskCancelled, WorkerStopping
 from app.core.settings import get_settings
 from app.storage.database import Store
 from app.services.downloader import download_media
-from app.services.files import safe_filename
+from app.services.files import FILE_TYPES, safe_filename
 from app.services.media import verify_media
 
 log = logging.getLogger("lee_toolbox.worker")
@@ -36,6 +37,12 @@ def execute_task(task, store, settings):
 
     try:
         check()
+        if task.get("tool_id", "video-download") == "xiaohongshu-export":
+            from app.services.xhs_export import export_note
+            export_note(task, store, settings, check)
+            return
+        if task.get("tool_id", "video-download") != "video-download":
+            raise AppError("INVALID_TOOL", "不支持的工具类型。", 422)
         media = resolve(task["source_text"])
         check()
         if task.get("format_id"):
@@ -70,7 +77,10 @@ def execute_task(task, store, settings):
                      error={"code": "TASK_FAILED", "message": "任务处理失败，请稍后重试。"})
         log.exception("Task %s failed unexpectedly", task_id)
     finally:
-        temporary.unlink(missing_ok=True)
+        if temporary.is_dir() and not temporary.is_symlink():
+            shutil.rmtree(temporary)
+        else:
+            temporary.unlink(missing_ok=True)
         if final and store.get(task_id)["status"] != "completed":
             final.unlink(missing_ok=True)
 
@@ -79,12 +89,16 @@ def recover_files(store, settings):
     """Clean only worker-owned remnants after interruption, retaining completed files."""
     store.recover()
     for stale in settings.tmp_dir.glob("*.part"):
-        if stale.is_file() and not stale.is_symlink():
-            stale.unlink(missing_ok=True)
-    interrupted = {task["id"] for task in store.list("interrupted")}
+        if not stale.is_symlink():
+            if stale.is_dir():
+                shutil.rmtree(stale)
+            elif stale.is_file():
+                stale.unlink(missing_ok=True)
+    with store.connect() as db:
+        interrupted = {row["id"] for row in db.execute("SELECT id FROM tasks WHERE status IN ('interrupted','cancelled','failed')")}
     for candidate in settings.downloads_dir.iterdir():
         task_id = candidate.name.split("_", 1)[0]
-        if task_id in interrupted and candidate.suffix == ".mp4" and candidate.is_file() and not candidate.is_symlink():
+        if task_id in interrupted and candidate.suffix in FILE_TYPES and candidate.is_file() and not candidate.is_symlink():
             candidate.unlink(missing_ok=True)
 
 

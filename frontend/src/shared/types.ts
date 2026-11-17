@@ -8,6 +8,9 @@ export interface Task {
   source_text: string
   format_id: string | null
   format_label: string
+  asset_ids?: string[] | null
+  asset_count?: number | null
+  finished_assets?: number | null
   progress: number
   downloaded_bytes: number
   total_bytes: number | null
@@ -37,5 +40,26 @@ export interface MediaInfo {
   duration: number
   source_url: string
   formats: MediaFormat[]
+}
+export interface XhsAsset {
+  id: string
+  kind: 'image' | 'video'
+  label: string
+  width: number
+  height: number
+  duration: number | null
+  available: boolean
+  unavailable_reason: string | null
+  preview_url: string | null
+  watermark_status: 'none' | 'present' | 'unknown'
+}
+export interface XhsNote {
+  platform: 'xiaohongshu'
+  id: string
+  title: string
+  author: string
+  source_url: string
+  warnings: string[]
+  assets: XhsAsset[]
 }
 export interface Health { status: string; worker_running: boolean; ffmpeg_available: boolean }

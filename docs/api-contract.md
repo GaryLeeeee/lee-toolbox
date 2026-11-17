@@ -13,14 +13,18 @@ All paths use `/api`. JSON errors: `{ "error": { "code": "...", "message": "中�
 ```
 `cover_url` is optional/null. Signed media URLs and request headers remain backend-private. Resolve may take tens of seconds. UI must show loading, error and retry states. Default format is first, sorted by resolution then preference/bitrate.
 
+## Xiaohongshu
+`POST /xhs/resolve` accepts the same text input and returns a note with selectable `image` / `video` assets and `watermark_status` (`none` / `present` / `unknown`). Live content is exposed as separate still images and MP4 videos; direct Live Photo export is currently unsupported. See [小红书接口约定](xiaohongshu-api.md) for fields and previews.
+
 ## Tasks
 - `POST /tasks` body `{ "source_text": "...", "format_id": "..." }` returns Task (HTTP 201). format_id optional.
+- For Xiaohongshu use `{ "tool_id": "xiaohongshu-export", "source_text": "...", "asset_ids": ["stable-id"] }`. Omitted `tool_id` defaults to `video-download`; incompatible tool options are rejected. Omitted `asset_ids` selects available resources; an empty or duplicate selection is invalid. Retry retains tool and selection.
 - `GET /tasks` returns `{ "items": [Task] }`, newest first. Optional `status` filter.
 - `GET /tasks/{id}` returns Task.
 - `POST /tasks/{id}/cancel` returns Task. Completed tasks cannot be cancelled.
 - `POST /tasks/{id}/retry` returns a NEW Task (HTTP 201), preserving original history. Failed/cancelled/interrupted tasks can retry.
 - `GET /tasks/{id}/file` downloads a completed file. Missing/non-complete returns structured error.
-- `GET /health` returns `{ "status": "ok", "worker_running": true, "ffmpeg_available": true }`.
+- `GET /health` returns `{ "status": "ok", "worker_running": true, "ffmpeg_available": true }`. Image/video export does not require Apple frameworks or Swift tools.
 
 Task fields:
 ```json
@@ -29,6 +33,7 @@ Task fields:
  "source_text": "分享文字", "format_id": null, "format_label": "自动选择",
  "progress": 0, "downloaded_bytes": 0, "total_bytes": null, "speed_bps": null,
  "file_name": null, "file_size": null, "file_available": false,
+ "asset_ids": null, "asset_count": null, "finished_assets": 0,
  "error": null, "created_at": "2026-11-16T00:00:00Z", "updated_at": "2026-11-16T00:00:00Z"
 }
 ```

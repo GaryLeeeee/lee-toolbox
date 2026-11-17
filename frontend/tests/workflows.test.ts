@@ -35,6 +35,7 @@ function mockFetch(handler: (url: string, init: RequestInit) => Promise<Response
 async function mountPage(component: typeof VideoDownload | typeof HomePage, path = '/tools/video-download') {
   const router = createRouter({ history: createMemoryHistory(), routes: [
     { path: '/', component: HomePage }, { path: '/tools/video-download', component: VideoDownload },
+    { path: '/tools/xiaohongshu-export', component: { template: '<div>小红书导出</div>' } },
     { path: '/tasks', component: { template: '<div>任务中心</div>' } },
   ] })
   await router.push(path); await router.isReady()

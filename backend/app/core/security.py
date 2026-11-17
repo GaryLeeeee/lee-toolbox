@@ -7,7 +7,8 @@ from urllib.parse import urlsplit, urljoin
 
 from app.core.errors import AppError
 
-MEDIA_DOMAINS = ("douyinvod.com", "douyin.com", "iesdouyin.com", "bytecdn.cn", "snssdk.com", "byteimg.com")
+MEDIA_DOMAINS = ("douyinvod.com", "douyin.com", "iesdouyin.com", "bytecdn.cn", "snssdk.com", "byteimg.com",
+                 "xhscdn.com", "ci.xiaohongshu.com")
 
 
 def public_destination(url: str):

@@ -1,4 +1,4 @@
-import type { MediaInfo, Task, Health } from './types'
+import type { MediaInfo, Task, Health, XhsNote } from './types'
 
 export class ApiError extends Error {
   constructor(public code: string, message: string, public status = 0) { super(message) }
@@ -32,6 +32,8 @@ export const api = {
   tasks: () => request<{ items: Task[] }>('/tasks'),
   resolve: (text: string) => post<MediaInfo>('/media/resolve', { text }, 90000),
   createTask: (source_text: string, format_id: string) => post<Task>('/tasks', { source_text, format_id }),
+  resolveXhs: (text: string) => post<XhsNote>('/xhs/resolve', { text }, 90000),
+  exportXhs: (source_text: string, asset_ids: string[]) => post<Task>('/tasks', { tool_id: 'xiaohongshu-export', source_text, asset_ids }),
   cancel: (id: string) => post<Task>(`/tasks/${encodeURIComponent(id)}/cancel`),
   retry: (id: string) => post<Task>(`/tasks/${encodeURIComponent(id)}/retry`),
 }

@@ -1,6 +1,6 @@
 # Lee Toolbox
 
-可持续扩展的本地工具箱。首版包含工具工作台、抖音视频下载和任务中心。
+可持续扩展的本地工具箱，包含工具工作台、抖音视频下载、小红书资源导出和任务中心。
 
 > 本项目仅供个人学习与技术交流，不用于商业用途。
 
@@ -21,6 +21,8 @@
 首次安装后，日常使用只需运行 `./scripts/start.sh`。代码更新后如依赖变化，重新运行 setup；前端变化则重新 build。前端使用 `package-lock.json`，后端使用 `requirements.lock.txt` 固定已验证的依赖版本。
 
 FFmpeg 优先使用系统安装版本，未安装时使用 Python 依赖 `imageio-ffmpeg` 提供的二进制程序。健康检查会显示其可用性。
+
+小红书支持图片和 MP4 视频导出，无需 macOS 或 Xcode。暂不支持直接导出 Live Photo；Live 笔记可以分别选择静态原图和动态视频。
 
 ## 开发
 
@@ -55,6 +57,22 @@ LEE_TOOLBOX_API_PORT=8010 LEE_TOOLBOX_WEB_PORT=5180 ./scripts/dev.sh
 
 平台接口、匿名会话和签名会变化。解析失败时会显示可读原因；遇到平台验证或作品不可访问时，不会无限重试。抖音解析器集中在 `backend/app/providers/douyin.py`，便于单独更新。
 
+### 小红书图片与视频
+
+1. 进入「小红书导出」，粘贴笔记分享文案或链接，点击解析。
+2. 查看预览及水印状态，勾选需要导出的图片或视频，创建导出任务。Live 笔记的静态原图和动态视频分别列出，可独立选择。
+3. 在任务中心下载结果：单张图片为图片文件、单个视频为 MP4，多项资源为 ZIP，内含资源清单 `manifest.json`。
+
+图片使用公开页面提供的原图标识；视频优先使用原始地址或明确标注无平台水印的流，没有时使用可获取的播放流。页面会区分无平台水印、含平台水印和水印状态未确认，ZIP 清单也记录该状态。导出保留源文件画面，不会裁剪、修补或去除水印；作者自行加入的文字/标记也会保留。只匿名访问公开分享页，不读取浏览器 Cookie；要求登录或验证的笔记会显示原因。
+
+图片支持 JPEG、PNG、WebP、GIF 和 HEIC/HEIF，按实际格式保存原始文件。HEIC/HEIF 仅在网页预览时转换为 JPEG，下载仍保留原图；相册兼容性取决于接收端是否支持该格式。HEIC 解码依赖 `pillow-heif`，更新旧版本后需运行 `./scripts/setup.sh` 并重启服务。分享文案中的 `https\://` 转义写法也可识别。
+
+**暂不支持直接导出 Live Photo。** Live 内容仅分别导出静态图片和普通 MP4 视频，不生成可导入苹果相册的 Live Photo 配对文件。网页常见的 `WEB_LIVEPHOTO_19` 动态视频带有平台水印，改为 MP4 导出仍会保留该水印。示例「又  到  九  月  底」可分别选择 10 张静态原图和 10 段带平台水印的动态视频；没有有效地址的资源会标为不可用。
+
+**待优化：小红书 Live 动态视频的声音导出。** 部分 Live 在 App 中播放有声音，但当前获取的网页视频没有音轨，导出 MP4 也无声，尚不能完整还原 App 播放效果。有声资源获取及可能的异步采集流程仍待验证，详见下方研究文档中的待优化记录。
+
+关于动态源的实测结果、登录限制和后续验证方向，见 [Live 无水印动态源研究](docs/xiaohongshu-live-research.md)。
+
 ## 目录
 
 ```text
@@ -67,6 +85,7 @@ backend/app/core/        配置、错误与网络访问约束
 backend/app/storage/     SQLite 任务持久化
 backend/app/jobs/        后台 worker 和任务执行
 backend/app/services/    下载、媒体验证等服务
+backend/app/native/      保留的 Live Photo 配对实验源码（未接入导出）
 backend/tests/           后端自动化测试
 scripts/                统一安装、开发、构建、测试和运行
 docs/                   接口约定和扩展说明
@@ -83,9 +102,11 @@ data/                   本机数据库、结果文件和临时文件（不入 G
 
 ## 新增工具
 
-参见 [新增工具指南](docs/adding-tools.md) 和 [API 契约](docs/api-contract.md)。首页入口、搜索、分类和工具路由由注册表驱动。JSON 格式化等工具可完全在浏览器执行；下载、音视频处理类工具复用后端任务与文件服务。
+参见 [新增工具指南](docs/adding-tools.md)、[API 契约](docs/api-contract.md) 和 [小红书接口约定](docs/xiaohongshu-api.md)。首页入口、搜索、分类和工具路由由注册表驱动。JSON 格式化等工具可完全在浏览器执行；下载、音视频处理类工具复用后端任务与文件服务。
 
 ## 解析实现参考
 
 抖音解析流程参考 [yt-dlp 抖音提取修复 PR #17826](https://github.com/yt-dlp/yt-dlp/pull/17826)，通过匿名会话取得作品详情，再选择可用的播放资源。该适配器并非抖音官方 API SDK，需要随平台变化维护。
+
+小红书资源字段参考 [XHS-Downloader 的图片/视频适配器](https://github.com/JoeanAmier/XHS-Downloader/tree/master/source/application)，适配器位于 `backend/app/providers/xiaohongshu.py`。平台页面及 CDN 规则变化可能影响资源获取。
 
