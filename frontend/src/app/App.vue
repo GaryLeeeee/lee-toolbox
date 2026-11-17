@@ -8,6 +8,7 @@ import { activeTasks, refreshHealth, startPolling, state } from '../shared/state
 const route = useRoute()
 const mobileOpen = ref(false)
 const title = computed(() => route.meta.title || '工作台')
+const isBrowserTool = computed(() => tools.some(tool => tool.id === route.meta.toolId && tool.execution === 'browser'))
 let stop: (() => void) | undefined
 onMounted(() => { stop = startPolling() })
 onUnmounted(() => stop?.())
@@ -57,7 +58,7 @@ onUnmounted(() => document.removeEventListener('keydown', escape))
         </div>
       </header>
       <main id="main-content" class="main-content">
-        <div v-if="state.connection === 'offline'" class="banner warning"><AlertCircle :size="18" /><span>本地服务暂时不可用，下载和任务功能需要服务连接。</span><button @click="refreshHealth">重新连接<ArrowUpRight :size="14" /></button></div>
+        <div v-if="state.connection === 'offline' && !isBrowserTool" class="banner warning"><AlertCircle :size="18" /><span>本地服务暂时不可用，下载和任务功能需要服务连接。</span><button @click="refreshHealth">重新连接<ArrowUpRight :size="14" /></button></div>
         <RouterView />
       </main>
       <footer class="workspace-footer"><span>小工具，大帮手。</span><span>Made for your everyday workflow <span class="footer-dot">·</span> Lee Toolbox</span></footer>

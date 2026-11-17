@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
-import { createMemoryHistory, createRouter } from 'vue-router'
+import { createMemoryHistory, createRouter, type RouteComponent } from 'vue-router'
 import VideoDownload from '../src/tools/video-download/VideoDownload.vue'
 import TaskRow from '../src/shared/components/TaskRow.vue'
 import HomePage from '../src/pages/HomePage.vue'
+import { tools } from '../src/registry/tools'
 import { state } from '../src/shared/state'
 import { favorites, recent } from '../src/shared/preferences'
 import type { MediaInfo, Task } from '../src/shared/types'
@@ -34,8 +35,8 @@ function mockFetch(handler: (url: string, init: RequestInit) => Promise<Response
 }
 async function mountPage(component: typeof VideoDownload | typeof HomePage, path = '/tools/video-download') {
   const router = createRouter({ history: createMemoryHistory(), routes: [
-    { path: '/', component: HomePage }, { path: '/tools/video-download', component: VideoDownload },
-    { path: '/tools/xiaohongshu-export', component: { template: '<div>小红书导出</div>' } },
+    { path: '/', component: HomePage },
+    ...tools.map(tool => ({ path: tool.route, component: tool.component as () => Promise<RouteComponent> })),
     { path: '/tasks', component: { template: '<div>任务中心</div>' } },
   ] })
   await router.push(path); await router.isReady()
